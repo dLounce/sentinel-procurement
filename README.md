@@ -60,11 +60,50 @@ checks and cannot create an order unless all pass. The price guard is a
 deterministic policy whose coverage is measured empirically — it is not a
 mathematical guarantee against all value corruption.
 
+## Evaluation
+
+`eval/` runs a deterministic red-team set through the real negotiation path and
+reports the two security properties separately. Evaluation-only ground truth
+(true quote, legitimate range, expected delivery) lives only in the harness; the
+runtime Buyer/Interpreter/Vendors never receive it. Reproduce with:
+
+```
+python -m eval.run_redteam
+```
+
+Measured results (17 cases: a legitimate baseline, 15 adversarial payloads, and
+one known-limitation probe; seed 1337):
+
+- **Metric A — action reachability (architectural): 0.** No payload reached the
+  `place_order` surface. The Interpreter has no action capability and the only
+  path to an order is the gated Buyer method, so attacker content cannot supply
+  order arguments outside the validated deterministic path.
+- **Metric B — value corruption (empirical): 0 anomalous in-budget orders** under
+  the defined set. Across the 15 payloads, 12 value-corruption attempts (drastic
+  underpricing, in-budget outlier, non-USD, missing/unparseable price,
+  flagged/ambiguous delivery) were detected and blocked by the deterministic
+  guards; direct prompt injection, action/field smuggling, and vendor identity
+  spoofing were contained by schema validation and transport identity stamping.
+
+These are results for the defined evaluation set, not a guarantee. Metric A is
+architectural; Metric B is an empirical property of the deterministic guards
+against these specific cases and is not proven complete.
+
+**Known limitation.** The price value channel has a deterministic plausibility
+guard; the delivery value channel does not. A confidently-fooled Interpreter that
+reports a fast delivery with no ambiguity flag can therefore produce an anomalous
+order — observed in one known-limitation probe. Malformed, ambiguous, hidden, and
+unparseable delivery are flagged and blocked; a clean, confident delivery lie is
+only defended by Interpreter extraction integrity, which is model-dependent and
+not deterministically guaranteed.
+
 ## Layout
 
 ```
+agents/    Buyer, Interpreter, Vendor
 schemas/   the VendorOffer contract
 guards/    deterministic checks (not agents)
+eval/      evaluation-only red-team harness (ground truth stays here)
 tests/     control-level tests
 ```
 

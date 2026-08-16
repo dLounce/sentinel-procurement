@@ -72,6 +72,8 @@ class Buyer:
         if not isinstance(offer, dict):
             raise TypeError("place_order requires a validated VendorOffer, not raw vendor text")
 
+        if offer["extraction_flag"] == "unparseable_delivery":
+            raise OrderRejected("delivery_flag")
         if offer["delivery_days"] > self.rfq.max_delivery_days:
             raise OrderRejected("delivery")
         if not within_budget(offer["unit_price"], self.rfq.quantity, self.rfq.budget):

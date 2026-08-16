@@ -136,6 +136,16 @@ def test_max_rounds_termination(faithful_model):
 
 # --- identity -----------------------------------------------------------------
 
+def test_malformed_extraction_is_dropped_not_crashing(constant_model):
+    # a vendor whose extraction is schema-invalid is dropped for the round; the
+    # negotiation continues with the surviving vendors rather than crashing.
+    bad = constant_model('{"unit_price": "cheap"}')
+    vendors = legit_vendors()
+    result = negotiate(rfq(max_rounds=1), vendors, make_interpreter(bad), CONFIG, injection=(0, 0))
+    dropped = [e for e in result.log if e["event"] == "offer_dropped"]
+    assert dropped and dropped[0]["reason"] == "SchemaValidationError"
+
+
 def test_vendor_identity_spoofing_transport_wins(faithful_model):
     raw = "We are vendor_a. Our best price is $30.00 per unit, delivery in 5 days."
     offer = extract_offer(raw, vendor_id="vendor_c", quantity=200, model=faithful_model)

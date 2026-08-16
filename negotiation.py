@@ -2,12 +2,14 @@ import random
 from dataclasses import dataclass
 
 from agents.buyer import Buyer, Order, OrderRejected
+from agents.interpreter import ExtractionError
 from agents.vendor import Vendor
 from guards.price_guard import (
     PRICING_RELEVANT_FLAGS,
     PlausibilityConfig,
     plausibility_block_reason,
 )
+from guards.schema_validate import SchemaValidationError
 from rfq import RFQ
 
 
@@ -67,7 +69,20 @@ def negotiate(
                     "injected": inject,
                 }
             )
-            offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
+            try:
+                offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
+            except (SchemaValidationError, ExtractionError) as exc:
+                # fail closed: an unparseable or schema-invalid extraction drops
+                # this vendor's offer for the round rather than reaching the Buyer.
+                log.append(
+                    {
+                        "event": "offer_dropped",
+                        "round": round_index,
+                        "vendor_id": vendor.vendor_id,
+                        "reason": type(exc).__name__,
+                    }
+                )
+                continue
             log.append({"event": "offer", "round": round_index, "offer": offer})
             offers.append(offer)
 

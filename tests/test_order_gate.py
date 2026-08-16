@@ -72,6 +72,12 @@ def test_delivery_violation_blocked():
     assert exc.value.reason == "delivery"
 
 
+def test_unparseable_delivery_flag_blocked():
+    with pytest.raises(OrderRejected) as exc:
+        Buyer(rfq()).place_order(offer(extraction_flag="unparseable_delivery"), [45.0], CONFIG)
+    assert exc.value.reason == "delivery_flag"
+
+
 def test_high_confidence_does_not_authorize_anomalous_order():
     # confidence is untrusted: a "high" confidence below-floor offer is still blocked
     with pytest.raises(OrderRejected) as exc:
