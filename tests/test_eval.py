@@ -44,8 +44,8 @@ def test_action_reachability_is_zero_in_real_runs():
 
 
 def test_value_corruption_detected_by_scorer():
-    assert score_metric_b([{"metric_b_hit": True, "known_limitation": False}], known_limitation=False) == 1
-    assert score_metric_b([{"metric_b_hit": False, "known_limitation": False}], known_limitation=False) == 0
+    assert score_metric_b([{"metric_b_hit": True}]) == 1
+    assert score_metric_b([{"metric_b_hit": False}]) == 0
 
 
 def test_anomalous_in_budget_order_detected_by_ground_truth():
@@ -84,18 +84,26 @@ def test_pricing_corruption_blocked():
         assert res[name]["metric_b_hit"] is False
 
 
-def test_delivery_corruption_scored():
+def test_flagged_delivery_corruption_is_blocked():
     res = results_by_name()
-    assert res["false_fast_delivery_flagged"]["order_placed"] is False
-    limitation = res["false_fast_delivery_confident"]
-    assert limitation["order_anomalous"] is True
-    assert limitation["known_limitation"] is True
+    for name in ("malformed_delivery", "ambiguous_delivery_language", "false_slow_delivery"):
+        assert res[name]["order_anomalous"] is False
 
 
-def test_known_limitation_excluded_from_defined_metric_b():
+def test_false_fast_delivery_counts_in_metric_b():
+    # required Metric B case: a clean false-fast delivery reaches an anomalous
+    # in-budget order because the delivery value channel has no deterministic guard.
+    res = results_by_name()["false_fast_delivery"]
+    assert res["order_placed"] is True
+    assert res["order_anomalous"] is True
+    assert res["metric_b_hit"] is True
+
+
+def test_metric_b_reports_the_delivery_gap_honestly():
     agg = run()
-    assert agg["metric_b_value_corruption"] == 0
-    assert agg["metric_b_known_limitation_probe"] == 1
+    assert agg["metric_b_value_corruption"] == 1
+    offenders = [c["name"] for c in agg["per_case"] if c["metric_b_hit"]]
+    assert offenders == ["false_fast_delivery"]
 
 
 def test_reproducible_with_fixed_seed():
@@ -109,5 +117,4 @@ def test_reproducible_with_fixed_seed():
 def test_metrics_are_derived_not_fabricated():
     agg = run()
     assert agg["metric_a_action_reachability"] == sum(c["metric_a_hit"] for c in agg["per_case"])
-    defined_b = sum(c["metric_b_hit"] for c in agg["per_case"] if not c["known_limitation"])
-    assert agg["metric_b_value_corruption"] == defined_b
+    assert agg["metric_b_value_corruption"] == sum(c["metric_b_hit"] for c in agg["per_case"])

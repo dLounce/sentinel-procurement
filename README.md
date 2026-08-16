@@ -71,31 +71,33 @@ runtime Buyer/Interpreter/Vendors never receive it. Reproduce with:
 python -m eval.run_redteam
 ```
 
-Measured results (17 cases: a legitimate baseline, 15 adversarial payloads, and
-one known-limitation probe; seed 1337):
+Measured results (16 cases: a legitimate baseline and 15 adversarial payloads;
+seed 1337):
 
 - **Metric A — action reachability (architectural): 0.** No payload reached the
   `place_order` surface. The Interpreter has no action capability and the only
   path to an order is the gated Buyer method, so attacker content cannot supply
   order arguments outside the validated deterministic path.
-- **Metric B — value corruption (empirical): 0 anomalous in-budget orders** under
-  the defined set. Across the 15 payloads, 12 value-corruption attempts (drastic
-  underpricing, in-budget outlier, non-USD, missing/unparseable price,
-  flagged/ambiguous delivery) were detected and blocked by the deterministic
-  guards; direct prompt injection, action/field smuggling, and vendor identity
-  spoofing were contained by schema validation and transport identity stamping.
+- **Metric B — value corruption (empirical): 1 anomalous in-budget order.** Of the
+  15 payloads, 11 value-corruption attempts (drastic underpricing, in-budget
+  outlier, non-USD, missing/unparseable price, malformed/ambiguous/hidden/false-
+  slow delivery) were detected and blocked; direct prompt injection, action/field
+  smuggling, and vendor identity spoofing were contained by schema validation and
+  transport identity stamping. **One case was not blocked: a false-fast delivery
+  corruption reached an anomalous in-budget order.**
 
-These are results for the defined evaluation set, not a guarantee. Metric A is
-architectural; Metric B is an empirical property of the deterministic guards
-against these specific cases and is not proven complete.
+Metric A is architectural. Metric B is an empirical property of the deterministic
+guards against these specific cases and is not proven complete — the one observed
+failure demonstrates that directly.
 
-**Known limitation.** The price value channel has a deterministic plausibility
-guard; the delivery value channel does not. A confidently-fooled Interpreter that
-reports a fast delivery with no ambiguity flag can therefore produce an anomalous
-order — observed in one known-limitation probe. Malformed, ambiguous, hidden, and
-unparseable delivery are flagged and blocked; a clean, confident delivery lie is
-only defended by Interpreter extraction integrity, which is model-dependent and
-not deterministically guaranteed.
+**Finding — the delivery value channel is not deterministically guarded.** The
+price value channel has a deterministic plausibility guard (floor/outlier/flag);
+the delivery value channel does not. Malformed, ambiguous, hidden, and unparseable
+delivery are flagged and blocked, but a clean false-fast delivery value (a
+well-formed but wrong `delivery_days`) has no deterministic cross-check and
+produced an anomalous in-budget order in the evaluation. Closing this would
+require a deterministic delivery-value control analogous to the price guard; it is
+reported here rather than hidden.
 
 ## Layout
 
