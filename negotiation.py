@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from agents.buyer import Buyer
-from agents.interpreter import extract_offer
 from agents.vendor import Vendor
 from rfq import RFQ
 
@@ -13,13 +12,14 @@ class NegotiationResult:
     log: list
 
 
-def negotiate(rfq: RFQ, vendor: Vendor) -> NegotiationResult:
+def negotiate(rfq: RFQ, vendor: Vendor, interpreter) -> NegotiationResult:
     """Run a single-vendor negotiation.
 
-    Raw vendor text flows only through the Interpreter boundary; the Buyer sees
-    the validated VendorOffer, never the raw message (which is kept in the audit
-    log only). Terminates in exactly one of closed_deal / closed_no_deal /
-    closed_max_rounds.
+    ``interpreter`` is the injected Interpreter boundary
+    ``(raw_text, *, vendor_id, quantity) -> VendorOffer``. Raw vendor text flows
+    only through it; the Buyer sees the validated VendorOffer, never the raw
+    message (which is kept in the audit log only). Terminates in exactly one of
+    closed_deal / closed_no_deal / closed_max_rounds.
     """
     buyer = Buyer(rfq)
     log: list = []
@@ -36,7 +36,7 @@ def negotiate(rfq: RFQ, vendor: Vendor) -> NegotiationResult:
             }
         )
 
-        offer = extract_offer(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
+        offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
         log.append({"event": "offer", "round": round_index, "offer": offer})
 
         decision = buyer.decide(offer)
