@@ -1,0 +1,17 @@
+[project]
+name = "sentinel-procurement"
+version = "0.1.0"
+description = "Privilege-separated multi-agent procurement negotiation with a quarantined interpreter boundary"
+requires-python = ">=3.10"
+dependencies = [
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

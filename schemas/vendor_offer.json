@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VendorOffer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "vendor_id",
+    "unit_price",
+    "currency",
+    "delivery_days",
+    "confidence",
+    "quoted_basis",
+    "extraction_flag"
+  ],
+  "properties": {
+    "vendor_id": {
+      "type": "string",
+      "enum": ["vendor_a", "vendor_b", "vendor_c"]
+    },
+    "unit_price": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "currency": {
+      "type": "string",
+      "enum": ["USD", "other"]
+    },
+    "delivery_days": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "quoted_basis": {
+      "type": "string",
+      "enum": ["per_unit", "total"]
+    },
+    "extraction_flag": {
+      "type": "string",
+      "enum": [
+        "none",
+        "tiered",
+        "range",
+        "conditional",
+        "non_usd",
+        "missing_price",
+        "unparseable_delivery"
+      ]
+    }
+  }
+}
