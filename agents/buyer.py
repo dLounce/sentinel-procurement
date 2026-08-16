@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from guards.budget_guard import order_total, within_budget
+from guards.price_guard import PlausibilityConfig, plausibility_block_reason
 from rfq import RFQ
 
 
@@ -9,12 +11,29 @@ class Decision:
     counter_price: float | None = None
 
 
+@dataclass(frozen=True)
+class Order:
+    vendor_id: str
+    unit_price: float
+    quantity: int
+    total: float
+
+
+class OrderRejected(Exception):
+    """Raised when a deterministic order gate refuses to place an order."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class Buyer:
-    """Privileged negotiator.
+    """Privileged negotiator and sole holder of the order capability.
 
     decide() accepts only a validated VendorOffer (a dict), never raw vendor
-    text. The type guard makes "the Buyer never reads untrusted text" true in
-    code, not just in a diagram.
+    text. place_order() is the only path to an Order and is born gated: it
+    re-runs every deterministic check and refuses unless all pass. It never reads
+    ``confidence`` or any model reasoning — those cannot authorize an order.
     """
 
     def __init__(self, rfq: RFQ):
@@ -37,3 +56,27 @@ class Buyer:
         if not improved:
             return Decision("reject")
         return Decision("counter", counter_price=round(self._affordable_unit, 2))
+
+    def place_order(
+        self,
+        offer: dict,
+        round_unit_prices,
+        plausibility_config: PlausibilityConfig,
+    ) -> Order:
+        if not isinstance(offer, dict):
+            raise TypeError("place_order requires a validated VendorOffer, not raw vendor text")
+
+        if offer["delivery_days"] > self.rfq.max_delivery_days:
+            raise OrderRejected("delivery")
+        if not within_budget(offer["unit_price"], self.rfq.quantity, self.rfq.budget):
+            raise OrderRejected("budget")
+        reason = plausibility_block_reason(offer, round_unit_prices, plausibility_config)
+        if reason is not None:
+            raise OrderRejected(reason)
+
+        return Order(
+            vendor_id=offer["vendor_id"],
+            unit_price=offer["unit_price"],
+            quantity=self.rfq.quantity,
+            total=order_total(offer["unit_price"], self.rfq.quantity),
+        )
