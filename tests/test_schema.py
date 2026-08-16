@@ -10,7 +10,7 @@ def valid_offer():
         "currency": "USD",
         "delivery_days": 8,
         "confidence": "medium",
-        "quoted_basis": "per_unit",
+        "quoted_basis": "unit",
         "extraction_flag": "none",
     }
 
@@ -19,11 +19,31 @@ def test_valid_offer_passes():
     assert validate_offer(valid_offer()) == valid_offer()
 
 
-def test_flagged_offer_with_null_price_is_structurally_valid():
+def test_flagged_offer_keeps_numeric_price():
     offer = valid_offer()
-    offer["unit_price"] = None
     offer["extraction_flag"] = "missing_price"
     assert validate_offer(offer) == offer
+
+
+def test_null_price_rejected():
+    offer = valid_offer()
+    offer["unit_price"] = None
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
+
+
+def test_null_delivery_rejected():
+    offer = valid_offer()
+    offer["delivery_days"] = None
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
+
+
+def test_non_usd_currency_rejected():
+    offer = valid_offer()
+    offer["currency"] = "EUR"
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
 
 
 def test_missing_required_field_rejected():

@@ -15,18 +15,18 @@
   "properties": {
     "vendor_id": {
       "type": "string",
-      "enum": ["vendor_a", "vendor_b", "vendor_c"]
+      "pattern": "^vendor_[a-c]$"
     },
     "unit_price": {
-      "type": ["number", "null"],
+      "type": "number",
       "minimum": 0
     },
     "currency": {
       "type": "string",
-      "enum": ["USD", "other"]
+      "enum": ["USD"]
     },
     "delivery_days": {
-      "type": ["integer", "null"],
+      "type": "integer",
       "minimum": 0
     },
     "confidence": {
@@ -35,7 +35,7 @@
     },
     "quoted_basis": {
       "type": "string",
-      "enum": ["per_unit", "total"]
+      "enum": ["unit", "total", "unknown"]
     },
     "extraction_flag": {
       "type": "string",
