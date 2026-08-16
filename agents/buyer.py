@@ -6,8 +6,9 @@ from rfq import RFQ
 
 
 @dataclass
-class Decision:
-    action: str
+class RoundDecision:
+    action: str  # "accept" | "counter" | "reject"
+    offer: dict | None = None  # the chosen VendorOffer when action == "accept"
     counter_price: float | None = None
 
 
@@ -30,10 +31,10 @@ class OrderRejected(Exception):
 class Buyer:
     """Privileged negotiator and sole holder of the order capability.
 
-    decide() accepts only a validated VendorOffer (a dict), never raw vendor
-    text. place_order() is the only path to an Order and is born gated: it
-    re-runs every deterministic check and refuses unless all pass. It never reads
-    ``confidence`` or any model reasoning — those cannot authorize an order.
+    It reasons only over validated VendorOffers (never raw vendor text) and never
+    sees any vendor's reservation price. place_order() is the only path to an
+    Order and is born gated: it re-runs every deterministic check and refuses
+    unless all pass. It never reads ``confidence`` or any model reasoning.
     """
 
     def __init__(self, rfq: RFQ):
@@ -41,21 +42,26 @@ class Buyer:
         self._affordable_unit = rfq.budget / rfq.quantity
         self._last_price: float | None = None
 
-    def decide(self, offer: dict) -> Decision:
-        if not isinstance(offer, dict):
-            raise TypeError("Buyer requires a validated VendorOffer, not raw vendor text")
+    def decide_round(self, offers) -> RoundDecision:
+        for offer in offers:
+            if not isinstance(offer, dict):
+                raise TypeError("Buyer requires validated VendorOffers, not raw vendor text")
 
-        price = offer["unit_price"]
-        delivery = offer["delivery_days"]
+        deliverable = [o for o in offers if o["delivery_days"] <= self.rfq.max_delivery_days]
+        affordable = [o for o in deliverable if o["unit_price"] <= self._affordable_unit]
+        if affordable:
+            best = min(affordable, key=lambda o: o["unit_price"])
+            return RoundDecision("accept", offer=best)
 
-        if price <= self._affordable_unit and delivery <= self.rfq.max_delivery_days:
-            return Decision("accept")
-
-        improved = self._last_price is None or price < self._last_price - 1e-9
-        self._last_price = price
+        pool = deliverable or offers
+        best_price = min((o["unit_price"] for o in pool), default=None)
+        improved = self._last_price is None or (
+            best_price is not None and best_price < self._last_price - 1e-9
+        )
+        self._last_price = best_price
         if not improved:
-            return Decision("reject")
-        return Decision("counter", counter_price=round(self._affordable_unit, 2))
+            return RoundDecision("reject")
+        return RoundDecision("counter", counter_price=round(self._affordable_unit, 2))
 
     def place_order(
         self,

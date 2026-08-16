@@ -1,8 +1,13 @@
+import random
 from dataclasses import dataclass
 
 from agents.buyer import Buyer, Order, OrderRejected
 from agents.vendor import Vendor
-from guards.price_guard import PlausibilityConfig
+from guards.price_guard import (
+    PRICING_RELEVANT_FLAGS,
+    PlausibilityConfig,
+    plausibility_block_reason,
+)
 from rfq import RFQ
 
 
@@ -14,41 +19,78 @@ class NegotiationResult:
     order: Order | None = None
 
 
+def choose_injection(num_vendors: int, max_rounds: int, rng: random.Random):
+    """Randomly pick which vendor injects and on which round. Per run, so no
+    vendor is permanently the attacker and the Buyer cannot learn to distrust
+    one. The Buyer is never told the result."""
+    return rng.randrange(num_vendors), rng.randrange(max_rounds)
+
+
 def negotiate(
     rfq: RFQ,
-    vendor: Vendor,
+    vendors: list[Vendor],
     interpreter,
     plausibility_config: PlausibilityConfig,
+    *,
+    rng: random.Random | None = None,
+    injection=None,
 ) -> NegotiationResult:
-    """Run a single-vendor negotiation.
+    """Run the multi-vendor negotiation.
 
-    ``interpreter`` is the injected Interpreter boundary
-    ``(raw_text, *, vendor_id, quantity) -> VendorOffer``. Raw vendor text flows
-    only through it; the Buyer sees the validated VendorOffer, never the raw
-    message (kept in the audit log only). An accepted offer becomes a deal only if
-    the deterministic order gate (delivery + budget + plausibility) passes; an
-    accepted-but-anomalous offer is blocked and negotiation continues. Terminates
-    in exactly one of closed_deal / closed_no_deal / closed_max_rounds.
+    Each round the RFQ (or a counter) fans out to every vendor; exactly one
+    vendor on one randomized round embeds an injection in its otherwise-normal
+    reply. Every reply crosses the Interpreter boundary and schema validation
+    before the Buyer sees it — the Buyer never reads raw vendor text and never
+    sees a reservation price. The price guard runs over the round's offers; the
+    Buyer reasons over the survivors and orders only through the gated
+    place_order. Terminates in closed_deal / closed_no_deal / closed_max_rounds.
     """
+    if injection is None:
+        injection = choose_injection(len(vendors), rfq.max_rounds, rng or random.Random())
+    inject_vendor_index, inject_round = injection
+
     buyer = Buyer(rfq)
     log: list = []
     counter: float | None = None
 
     for round_index in range(rfq.max_rounds):
-        raw = vendor.quote(rfq, round_index, counter)
-        log.append(
-            {
-                "event": "vendor_message",
-                "round": round_index,
-                "vendor_id": vendor.vendor_id,
-                "raw_text": raw,
-            }
-        )
+        offers = []
+        for i, vendor in enumerate(vendors):
+            inject = i == inject_vendor_index and round_index == inject_round
+            raw = vendor.quote(rfq, round_index, counter, inject=inject)
+            log.append(
+                {
+                    "event": "vendor_message",
+                    "round": round_index,
+                    "vendor_id": vendor.vendor_id,
+                    "raw_text": raw,
+                    "injected": inject,
+                }
+            )
+            offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
+            log.append({"event": "offer", "round": round_index, "offer": offer})
+            offers.append(offer)
 
-        offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
-        log.append({"event": "offer", "round": round_index, "offer": offer})
+        round_unit_prices = [
+            o["unit_price"] for o in offers if o["extraction_flag"] not in PRICING_RELEVANT_FLAGS
+        ]
 
-        decision = buyer.decide(offer)
+        plausible = []
+        for offer in offers:
+            reason = plausibility_block_reason(offer, round_unit_prices, plausibility_config)
+            if reason is None:
+                plausible.append(offer)
+            else:
+                log.append(
+                    {
+                        "event": "offer_blocked",
+                        "round": round_index,
+                        "vendor_id": offer["vendor_id"],
+                        "reason": reason,
+                    }
+                )
+
+        decision = buyer.decide_round(plausible)
         log.append(
             {
                 "event": "decision",
@@ -59,20 +101,22 @@ def negotiate(
         )
 
         if decision.action == "accept":
+            chosen = decision.offer
             try:
-                order = buyer.place_order(offer, [offer["unit_price"]], plausibility_config)
+                order = buyer.place_order(chosen, round_unit_prices, plausibility_config)
             except OrderRejected as rejected:
                 log.append(
                     {
                         "event": "offer_blocked",
                         "round": round_index,
+                        "vendor_id": chosen["vendor_id"],
                         "reason": rejected.reason,
                     }
                 )
                 counter = round(rfq.budget / rfq.quantity, 2)
                 continue
             log.append({"event": "order_placed", "round": round_index, "order": order})
-            return NegotiationResult("closed_deal", offer, log, order)
+            return NegotiationResult("closed_deal", chosen, log, order)
         if decision.action == "reject":
             return NegotiationResult("closed_no_deal", None, log)
         counter = decision.counter_price
