@@ -1,0 +1,4 @@
+bedrock-agentcore
+boto3
+jsonschema>=4.0
+langgraph>=0.2

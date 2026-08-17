@@ -1,0 +1,62 @@
+{
+  "Version": "2012-10-17",
+  "_comment": "Policy for the human/CI principal that DEPLOYS and INVOKES the runtimes. This is the caller identity — the ONLY identity holding InvokeAgentRuntime. It is NOT attached to either runtime execution role. Scoped to bedrock-agentcore-* resources; no AdministratorAccess, no broad wildcards except where the AWS service requires it (documented per statement). If you use the npm @aws/agentcore CLI (CDK), also grant CloudFormation + `cdk bootstrap` permissions.",
+  "Statement": [
+    {
+      "Sid": "IAMRoleManagement",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:TagRole", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"],
+      "Resource": ["arn:aws:iam::<ACCOUNT_ID>:role/*BedrockAgentCore*", "arn:aws:iam::<ACCOUNT_ID>:role/service-role/*BedrockAgentCore*"]
+    },
+    {
+      "Sid": "PassExecutionRolesToAgentCoreOnly",
+      "Effect": "Allow",
+      "Action": ["iam:PassRole"],
+      "Resource": ["arn:aws:iam::<ACCOUNT_ID>:role/*BedrockAgentCore*", "arn:aws:iam::<ACCOUNT_ID>:role/service-role/*AmazonBedrockAgentCore*"],
+      "Condition": { "StringEquals": { "iam:PassedToService": "bedrock-agentcore.amazonaws.com" } }
+    },
+    {
+      "Sid": "CodeBuildScoped",
+      "Effect": "Allow",
+      "Action": ["codebuild:StartBuild", "codebuild:BatchGetBuilds", "codebuild:CreateProject", "codebuild:UpdateProject", "codebuild:BatchGetProjects", "codebuild:ListBuildsForProject"],
+      "Resource": ["arn:aws:codebuild:<REGION>:<ACCOUNT_ID>:project/bedrock-agentcore-*", "arn:aws:codebuild:<REGION>:<ACCOUNT_ID>:build/bedrock-agentcore-*"]
+    },
+    {
+      "Sid": "S3ArtifactsScoped",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:CreateBucket"],
+      "Resource": ["arn:aws:s3:::bedrock-agentcore-*", "arn:aws:s3:::bedrock-agentcore-*/*"]
+    },
+    {
+      "Sid": "ECRImagesScoped",
+      "Effect": "Allow",
+      "Action": ["ecr:CreateRepository", "ecr:DescribeRepositories", "ecr:BatchCheckLayerAvailability", "ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload"],
+      "Resource": ["arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/bedrock-agentcore-*"]
+    },
+    {
+      "Sid": "ECRAndCodeBuildListTokens",
+      "Effect": "Allow",
+      "Action": ["ecr:GetAuthorizationToken", "codebuild:ListProjects"],
+      "Resource": ["*"],
+      "_comment": "ecr:GetAuthorizationToken and codebuild:ListProjects do not support resource-level scoping (AWS requirement)."
+    },
+    {
+      "Sid": "AgentCoreControlAndInvoke",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:CreateAgentRuntime", "bedrock-agentcore:UpdateAgentRuntime", "bedrock-agentcore:DeleteAgentRuntime", "bedrock-agentcore:GetAgentRuntime", "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:InvokeAgentRuntime"],
+      "Resource": ["arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/*"]
+    },
+    {
+      "Sid": "IsolationVerificationOnExecutionRoles",
+      "Effect": "Allow",
+      "Action": ["iam:SimulatePrincipalPolicy", "iam:GetRolePolicy", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"],
+      "Resource": ["arn:aws:iam::<ACCOUNT_ID>:role/*BedrockAgentCore*", "arn:aws:iam::<ACCOUNT_ID>:role/service-role/*BedrockAgentCore*"]
+    },
+    {
+      "Sid": "LogsRead",
+      "Effect": "Allow",
+      "Action": ["logs:GetLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
+      "Resource": ["arn:aws:logs:<REGION>:<ACCOUNT_ID>:log-group:/aws/bedrock-agentcore/*"]
+    }
+  ]
+}

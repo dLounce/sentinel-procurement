@@ -6,3 +6,6 @@ venv/
 *.egg-info/
 .pytest_cache/
 eval/results/
+.bedrock_agentcore.yaml
+**/.env.local
+deploy/agentcore/agentcore/
