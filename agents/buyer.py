@@ -5,13 +5,6 @@ from guards.price_guard import PlausibilityConfig, plausibility_block_reason
 from rfq import RFQ
 
 
-@dataclass
-class RoundDecision:
-    action: str  # "accept" | "counter" | "reject"
-    offer: dict | None = None  # the chosen VendorOffer when action == "accept"
-    counter_price: float | None = None
-
-
 @dataclass(frozen=True)
 class Order:
     vendor_id: str
@@ -29,39 +22,18 @@ class OrderRejected(Exception):
 
 
 class Buyer:
-    """Privileged negotiator and sole holder of the order capability.
+    """Privileged actor and sole holder of the order capability.
 
-    It reasons only over validated VendorOffers (never raw vendor text) and never
-    sees any vendor's reservation price. place_order() is the only path to an
-    Order and is born gated: it re-runs every deterministic check and refuses
-    unless all pass. It never reads ``confidence`` or any model reasoning.
+    The negotiating brain is a separate LangGraph/LLM decider (agents/buyer_graph)
+    that only ever emits a structured BuyerDecision. This class is the
+    deterministic authorization layer: place_order() is the only path to an Order
+    and is born gated — it re-runs every deterministic check and refuses unless all
+    pass, regardless of what the Buyer LLM proposed. It never reads a reservation
+    price, raw vendor text, ``confidence``, or any model reasoning.
     """
 
     def __init__(self, rfq: RFQ):
         self.rfq = rfq
-        self._affordable_unit = rfq.budget / rfq.quantity
-        self._last_price: float | None = None
-
-    def decide_round(self, offers) -> RoundDecision:
-        for offer in offers:
-            if not isinstance(offer, dict):
-                raise TypeError("Buyer requires validated VendorOffers, not raw vendor text")
-
-        deliverable = [o for o in offers if o["delivery_days"] <= self.rfq.max_delivery_days]
-        affordable = [o for o in deliverable if o["unit_price"] <= self._affordable_unit]
-        if affordable:
-            best = min(affordable, key=lambda o: o["unit_price"])
-            return RoundDecision("accept", offer=best)
-
-        pool = deliverable or offers
-        best_price = min((o["unit_price"] for o in pool), default=None)
-        improved = self._last_price is None or (
-            best_price is not None and best_price < self._last_price - 1e-9
-        )
-        self._last_price = best_price
-        if not improved:
-            return RoundDecision("reject")
-        return RoundDecision("counter", counter_price=round(self._affordable_unit, 2))
 
     def place_order(
         self,

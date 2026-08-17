@@ -22,6 +22,19 @@ The design provides two distinct properties, and they are kept separate:
 Schema validation is necessary but not sufficient: a well-formed offer can still
 carry a wrong value (the "$1 SUV"), so business guards run before any order.
 
+## Agentic negotiation — models propose, deterministic controls authorize
+
+The Buyer and Vendors are genuinely model-driven. The Buyer runs a small LangGraph
+reasoning loop that reasons over the round's validated offers and history and emits
+a structured `BuyerDecision` (`accept` / `counter` / `reject` / `walk_away`) — it
+never calls `place_order`. The deterministic authorization layer (BuyerDecision
+schema validation + the guards + the gated `place_order`) independently decides
+what is *allowed*, so a confused or malicious Buyer model cannot bypass a control.
+Each Vendor's model proposes a price; a deterministic clamp enforces that vendor's
+private reservation floor, which never leaves the vendor. Models are injected
+(strong model for the Buyer, cheaper model for Vendors); tests use scripted
+doubles, so no live calls are made and behaviour is reproducible.
+
 ## The `VendorOffer` contract
 
 `schemas/vendor_offer.json` is the single object that crosses from the

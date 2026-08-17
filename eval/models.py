@@ -78,3 +78,31 @@ def add_field(key, value):
 
 def garbage():
     return lambda offer: "I'm sorry, I can't do that."
+
+
+# --- Vendor model double (evaluation/regression scaffolding) ------------------
+# Reproduces a deterministic concession so the eval exercises the security
+# controls against the same offer distributions as the M6 baseline. This is
+# scaffolding, not the production vendor brain (which is an injected LLM).
+
+_RESERVATION = re.compile(r"private_reservation_price:\s*([\d.]+)")
+_OPENING = re.compile(r"opening_price:\s*([\d.]+)")
+_BASE_DELIVERY = re.compile(r"base_delivery_days:\s*(\d+)")
+_ROUND = re.compile(r"round:\s*(\d+)")
+_COUNTER = re.compile(r"buyer_counter:\s*(none|\$[\d.]+)")
+
+
+def concession_vendor_model(prompt: str) -> str:
+    reservation = float(_RESERVATION.search(prompt).group(1))
+    opening = float(_OPENING.search(prompt).group(1))
+    base_delivery = int(_BASE_DELIVERY.search(prompt).group(1))
+    round_index = int(_ROUND.search(prompt).group(1))
+    counter_text = _COUNTER.search(prompt).group(1)
+    counter = None if counter_text == "none" else float(counter_text[1:])
+
+    scheduled = reservation + (opening - reservation) * (0.75 ** round_index)
+    if counter is not None:
+        scheduled = min(scheduled, max(reservation, counter))
+    return json.dumps(
+        {"unit_price": round(scheduled, 2), "delivery_days": base_delivery, "note": "Our offer."}
+    )

@@ -5,8 +5,10 @@ security properties separately. Ground truth is read only here, in the scorer;
 it is never passed into the runtime negotiation.
 """
 
+from agents.buyer_graph import deterministic_buyer_decider
 from agents.interpreter import make_interpreter
 from eval.cases import CONFIG, build_cases
+from eval.models import concession_vendor_model
 from negotiation import negotiate
 
 VALUE_CORRUPTION = ("price", "delivery")
@@ -43,7 +45,9 @@ def run_case(case) -> dict:
         case.rfq,
         case.vendors,
         make_interpreter(case.model),
+        deterministic_buyer_decider,
         CONFIG,
+        vendor_model=concession_vendor_model,
         injection=case.injection,
     )
 

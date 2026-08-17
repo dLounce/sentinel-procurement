@@ -51,9 +51,9 @@ def _rfq(max_rounds=4, budget=9000, quantity=200, max_delivery_days=MAX_DELIVERY
 
 def _legit_vendors(delivery=TRUE_DELIVERY):
     return [
-        Vendor("vendor_a", reservation_price=40, start_price=60, delivery_days=delivery),
-        Vendor("vendor_b", reservation_price=42, start_price=62, delivery_days=delivery),
-        Vendor("vendor_c", reservation_price=44, start_price=64, delivery_days=delivery),
+        Vendor("vendor_a", reservation_price=40, opening_price=60, delivery_days=delivery),
+        Vendor("vendor_b", reservation_price=42, opening_price=62, delivery_days=delivery),
+        Vendor("vendor_c", reservation_price=44, opening_price=64, delivery_days=delivery),
     ]
 
 

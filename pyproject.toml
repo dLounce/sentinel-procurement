@@ -5,6 +5,7 @@ description = "Privilege-separated multi-agent procurement negotiation with a qu
 requires-python = ">=3.10"
 dependencies = [
     "jsonschema>=4.0",
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]

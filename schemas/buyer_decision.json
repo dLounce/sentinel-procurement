@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BuyerDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["accept", "counter", "reject", "walk_away"]
+    },
+    "vendor_id": {
+      "type": ["string", "null"],
+      "pattern": "^vendor_[a-c]$"
+    },
+    "counter_price": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "rationale": {
+      "type": ["string", "null"],
+      "maxLength": 600
+    }
+  }
+}
