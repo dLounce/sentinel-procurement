@@ -2,7 +2,7 @@ from pathlib import Path
 
 from eval.adversarial.harness import Bundle, run_once
 from eval.adversarial.offline import OfflineBuyerModel, OfflineInterpreterModel, OfflineVendorModel
-from eval.adversarial.prompts import DISHONEST_OBJECTIVE, HONEST_OBJECTIVE, vendor_prompt
+from eval.adversarial.prompts import DISHONEST_OBJECTIVE, HONEST_OBJECTIVE, vendor_prompt, raw_vendor_prompt
 from eval.adversarial.scenarios import S2
 from eval.adversarial.vendor_agent import AdversarialVendor
 from rfq import RFQ
@@ -75,11 +75,9 @@ def test_honest_and_dishonest_prompts_are_minimal_contrast():
     rfq = RFQ(S2.scenario_id, S2.item, S2.quantity, S2.budget, S2.max_delivery_days, S2.max_rounds)
     honest = vendor_prompt(_AdversarialVendor(truth, "honest", None), rfq, 0, None, [])
     dishonest = vendor_prompt(_AdversarialVendor(truth, "dishonest", None), rfq, 0, None, [])
-    # identical after normalizing away only the objective clause
     assert honest.replace(HONEST_OBJECTIVE, "<OBJ>") == dishonest.replace(DISHONEST_OBJECTIVE, "<OBJ>")
 
 
-# --- production isolation (structural) ---------------------------------------
 
 def _src(name):
     return (Path(__file__).resolve().parent.parent / "eval" / "adversarial" / name).read_text()
@@ -87,9 +85,8 @@ def _src(name):
 
 def test_adversarial_introduces_no_second_place_order_path():
     orch = _src("orchestrator.py")
-    assert "def place_order" not in orch  # no reimplementation
-    assert "buyer.place_order(" in orch  # the only order path is the production gated method
-    # no eval/adversarial module defines its own guard/authorization
+    assert "def place_order" not in orch
+    assert "buyer.place_order(" in orch
     for name in ("orchestrator.py", "harness.py", "scoring.py"):
         assert "def place_order" not in _src(name)
 
@@ -99,3 +96,32 @@ def test_adversarial_uses_production_buyer_and_guards():
     assert "from agents.buyer_graph import make_buyer_decider" in orch
     assert "from agents.interpreter import" in orch
     assert "plausibility_block_reason" in orch and "validate_decision" in orch
+
+def test_raw_vendor_prompt_keeps_evaluator_state_private():
+    truth = S2.truth("vendor_c")
+    vendor = _AdversarialVendor(truth, "dishonest", OfflineVendorModel())
+    rfq = RFQ(
+        S2.scenario_id,
+        S2.item,
+        S2.quantity,
+        S2.budget,
+        S2.max_delivery_days,
+        S2.max_rounds,
+    )
+
+    prompt = raw_vendor_prompt(vendor, rfq, 0, None, [])
+
+    lowered = prompt.lower()
+    forbidden = (
+        "fair_value",
+        "fair_low",
+        "fair_high",
+        "vendor_a",
+        "vendor_b",
+        "seed",
+        "evaluator",
+        "ground_truth",
+    )
+
+    for token in forbidden:
+        assert token not in lowered

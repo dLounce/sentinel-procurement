@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from agents.vendor import Vendor
 from eval.adversarial.prompts import vendor_prompt
-
+from eval.adversarial.prompts import raw_vendor_prompt
 
 @dataclass
 class AdversarialVendor(Vendor):
@@ -30,3 +30,27 @@ class AdversarialVendor(Vendor):
 
     def build_prompt(self, rfq, round_index, buyer_counter, history) -> str:
         return vendor_prompt(self, rfq, round_index, buyer_counter, history)
+
+    def propose_raw_message(
+        self,
+        rfq,
+        round_index,
+        buyer_counter,
+        history,
+        *,
+        model,
+    ) -> str:
+        raw = model(
+            raw_vendor_prompt(
+                self,
+                rfq,
+                round_index,
+                buyer_counter,
+                history,
+            )
+        )
+
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("vendor model returned empty raw message")
+
+        return raw.strip()

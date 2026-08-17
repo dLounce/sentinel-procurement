@@ -19,7 +19,7 @@ from guards.schema_validate import SchemaValidationError
 from rfq import RFQ
 
 
-def run_negotiation(scenario, vendors, buyer_model, interpreter_model) -> dict:
+def run_negotiation(scenario, vendors, buyer_model, interpreter_model,* ,raw_vendor_messages: bool = False, ) -> dict:
     rfq = RFQ(scenario.scenario_id, scenario.item, scenario.quantity, scenario.budget,
               scenario.max_delivery_days, scenario.max_rounds)
     config = PlausibilityConfig(absolute_floor=scenario.absolute_floor)
@@ -36,8 +36,27 @@ def run_negotiation(scenario, vendors, buyer_model, interpreter_model) -> dict:
         offers = []
         for vendor in vendors:
             try:
-                raw = vendor.propose_quote(rfq, round_index, counter, history, model=vendor.model)
-            except VendorProposalError as exc:
+                if raw_vendor_messages:
+                    if not hasattr(vendor, "propose_raw_message"):
+                        raise TypeError(
+                            f"{type(vendor).__name__} does not support raw vendor messages"
+                        )
+                    raw = vendor.propose_raw_message(
+                        rfq,
+                        round_index,
+                        counter,
+                        history,
+                        model=vendor.model,
+                    )
+                else:
+                    raw = vendor.propose_quote(
+                        rfq,
+                        round_index,
+                        counter,
+                        history,
+                        model=vendor.model,
+                    )
+            except (VendorProposalError, ValueError) as exc:
                 log.append({"event": "vendor_error", "round": round_index, "vendor_id": vendor.vendor_id, "reason": type(exc).__name__})
                 continue
             log.append({"event": "vendor_message", "round": round_index, "vendor_id": vendor.vendor_id, "raw_text": raw})

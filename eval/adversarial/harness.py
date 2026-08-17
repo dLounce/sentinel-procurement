@@ -48,9 +48,21 @@ def build_vendors(scenario: Scenario, dishonest_ids, bundle: Bundle):
     ]
 
 
-def run_once(scenario: Scenario, dishonest_ids, bundle: Bundle) -> dict:
+def run_once(
+    scenario: Scenario,
+    dishonest_ids,
+    bundle: Bundle,
+    *,
+    raw_vendor_messages: bool = False,
+) -> dict:
     vendors = build_vendors(scenario, set(dishonest_ids), bundle)
-    return run_negotiation(scenario, vendors, bundle.buyer, bundle.interpreter)
+    return run_negotiation(
+        scenario,
+        vendors,
+        bundle.buyer,
+        bundle.interpreter,
+        raw_vendor_messages=raw_vendor_messages,
+    )
 
 
 def choose_dishonest(scenario: Scenario, n: int, seed: int):
@@ -58,7 +70,7 @@ def choose_dishonest(scenario: Scenario, n: int, seed: int):
     return set(random.Random(seed).sample(ids, n))
 
 
-def run_cell(scenario, dishonest_ids, target_id, make_bundle, k, seed0=0):
+def run_cell(scenario, dishonest_ids, target_id, make_bundle, k, seed0=0, *, raw_vendor_messages: bool = False, ):
     """K matched pairs (flip target only) + K A/A' null pairs, for one target."""
     dishonest_B = set(dishonest_ids)
     dishonest_A = dishonest_B - {target_id}  # target honest in A
@@ -66,8 +78,18 @@ def run_cell(scenario, dishonest_ids, target_id, make_bundle, k, seed0=0):
     a_welfares, b_welfares, per_pair, records = [], [], [], []
     for i in range(k):
         bundle = make_bundle(seed0 + i)
-        rec_a = run_once(scenario, dishonest_A, bundle)
-        rec_b = run_once(scenario, dishonest_B, bundle)
+        rec_a = run_once(
+            scenario,
+            dishonest_A,
+            bundle,
+            raw_vendor_messages=raw_vendor_messages,
+        )
+        rec_b = run_once(
+            scenario,
+            dishonest_B,
+            bundle,
+            raw_vendor_messages=raw_vendor_messages,
+        )
         m_a = run_metrics(rec_a, scenario, target_id)
         m_b = run_metrics(rec_b, scenario, target_id)
         a_welfares.append(m_a["welfare"])
@@ -79,8 +101,24 @@ def run_cell(scenario, dishonest_ids, target_id, make_bundle, k, seed0=0):
     for i in range(k):
         b1 = make_bundle(seed0 + i)
         b2 = make_bundle(seed0 + 10_000 + i)
-        w1 = welfare(run_once(scenario, dishonest_A, b1)["order"], scenario)
-        w2 = welfare(run_once(scenario, dishonest_A, b2)["order"], scenario)
+        w1 = welfare(
+            run_once(
+                scenario,
+                dishonest_A,
+                b1,
+                raw_vendor_messages=raw_vendor_messages,
+            )["order"],
+            scenario,
+        )
+        w2 = welfare(
+            run_once(
+                scenario,
+                dishonest_A,
+                b2,
+                raw_vendor_messages=raw_vendor_messages,
+            )["order"],
+            scenario,
+        )
         null_deltas.append(w1 - w2)
 
     band = stats.null_band(null_deltas)
@@ -110,13 +148,13 @@ def run_cell(scenario, dishonest_ids, target_id, make_bundle, k, seed0=0):
     }
 
 
-def run_baseline(scenario, make_bundle, k, seed0=0):
+def run_baseline(scenario, make_bundle, k, seed0=0, *, raw_vendor_messages: bool = False, ):
     """0-dishonest control: honest-market welfare reference (no target/pair)."""
     welfares = []
     records = []
     for i in range(k):
         bundle = make_bundle(seed0 + i)
-        rec = run_once(scenario, set(), bundle)
+        rec = run_once( scenario, set(), bundle, raw_vendor_messages=raw_vendor_messages, )
         welfares.append(welfare(rec["order"], scenario))
         records.append({"i": i, "run": rec})
     from statistics import mean, median
@@ -131,16 +169,34 @@ def run_baseline(scenario, make_bundle, k, seed0=0):
     }
 
 
-def run_matrix(scenarios, compositions, make_bundle, k, seed0=0, id_seed=0, write=True, tag="run"):
+def run_matrix(scenarios, compositions, make_bundle, k, seed0=0, id_seed=0, write=True, tag="run", *, raw_vendor_messages: bool = False, ):
     cells = []
     for scenario in scenarios:
         for comp in compositions:
             if comp == 0:
-                cells.append(run_baseline(scenario, make_bundle, k, seed0=seed0))
+                cells.append(
+                    run_baseline(
+                        scenario,
+                        make_bundle,
+                        k,
+                        seed0=seed0,
+                        raw_vendor_messages=raw_vendor_messages,
+                    )
+                )
                 continue
             dishonest = choose_dishonest(scenario, comp, id_seed)
             for target in sorted(dishonest):
-                cells.append(run_cell(scenario, dishonest, target, make_bundle, k, seed0=seed0))
+                cells.append(
+                    run_cell(
+                        scenario,
+                        dishonest,
+                        target,
+                        make_bundle,
+                        k,
+                        seed0=seed0,
+                        raw_vendor_messages=raw_vendor_messages,
+                    )
+                )
     report = {"tag": tag, "compositions": compositions, "k": k, "cells": cells}
     if write:
         RESULTS_DIR.mkdir(exist_ok=True)
