@@ -53,7 +53,13 @@ class OpenAICompatibleClient:
         }
         if self.seed is not None:
             kwargs["seed"] = self.seed
-        response = client.chat.completions.create(**kwargs)
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except TypeError:
+            if self.seed is None:
+                raise
+            kwargs.pop("seed", None)
+            response = client.chat.completions.create(**kwargs)
         self.last_system_fingerprint = getattr(response, "system_fingerprint", None)
         return response.choices[0].message.content
 
