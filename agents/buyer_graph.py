@@ -86,7 +86,19 @@ def _build_prompt(state: BuyerState) -> str:
         )
     if not state["offers"]:
         lines.append("  (no usable offers this round)")
-    lines.append(f"Prior rounds so far: {len(state['history'])}.")
+    if state["history"]:
+        lines.append("Negotiation history (earlier rounds):")
+        for past in state["history"][-4:]:
+            summary = ", ".join(
+                f"{o['vendor_id']} ${o['unit_price']:.2f}/{o['delivery_days']}d" for o in past["offers"]
+            ) or "no usable offers"
+            decision = past["decision"]
+            note = f" -> you {decision['action']}"
+            if decision.get("counter_price") is not None:
+                note += f" at ${decision['counter_price']:.2f}"
+            lines.append(f"  round {past['round'] + 1}: {summary}{note}")
+    else:
+        lines.append("No earlier rounds yet.")
     lines.append(
         "Reason about price, delivery, vendor alternatives, concessions, and when to "
         "walk away. Respond ONLY with JSON: "

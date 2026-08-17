@@ -66,10 +66,11 @@ def test_negotiation_history_is_passed_to_the_buyer():
         return '{"action":"reject"}'
 
     decide = make_buyer_decider(capture)
-    history = [{"round": 0, "offers": OFFERS, "decision": {"action": "counter"}}]
+    history = [{"round": 0, "offers": OFFERS, "decision": {"action": "counter", "counter_price": 40.0}}]
     decide(RFQ_VIEW, OFFERS, history, 1, 8)
-    assert "Prior rounds so far: 1" in captured["prompt"]
-    assert "vendor_a" in captured["prompt"] and "45.00" in captured["prompt"]
+    assert "Negotiation history" in captured["prompt"]
+    assert "round 1:" in captured["prompt"]  # the prior round's content, not just a count
+    assert "you counter at $40.00" in captured["prompt"]
 
 
 def test_buyer_prompt_contains_no_reservation_or_raw_text():

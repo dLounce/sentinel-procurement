@@ -46,7 +46,8 @@ class Vendor:
             f"base_delivery_days: {self.delivery_days}\n"
             f"round: {round_index}\n"
             f"buyer_counter: {counter}\n"
-            f"history_rounds: {len(history)}\n"
+            f"your_prior_offers: {[o['unit_price'] for h in history for o in h['offers'] if o['vendor_id'] == self.vendor_id]}\n"
+            f"prior_buyer_counters: {[h['decision']['counter_price'] for h in history if h['decision'].get('counter_price') is not None]}\n"
             'Respond ONLY with JSON: {"unit_price": <number>, "delivery_days": '
             '<integer>, "note": "<one short sentence to the buyer>"}'
         )
