@@ -92,12 +92,18 @@ def negotiate(
             offers.append(offer)
 
         round_unit_prices = [
-            o["unit_price"] for o in offers if o["extraction_flag"] not in PRICING_RELEVANT_FLAGS
+            o["unit_price"]
+            for o in offers
+            if o["extraction_flag"] not in PRICING_RELEVANT_FLAGS
         ]
 
         plausible = []
         for offer in offers:
-            reason = plausibility_block_reason(offer, round_unit_prices, plausibility_config)
+            reason = plausibility_block_reason(
+                offer,
+                round_unit_prices,
+                plausibility_config,
+            )
             if reason is None:
                 plausible.append(offer)
             else:
@@ -116,7 +122,11 @@ def negotiate(
                 log.append({"event": "offer_blocked", "round": round_index, "vendor_id": decision.get("vendor_id"), "reason": "accept_unknown_vendor"})
                 continue
             try:
-                order = buyer.place_order(chosen, round_unit_prices, plausibility_config)
+                order = buyer.place_order(
+                    chosen,
+                    round_unit_prices,
+                    plausibility_config,
+                )
             except OrderRejected as rejected:
                 log.append({"event": "offer_blocked", "round": round_index, "vendor_id": chosen["vendor_id"], "reason": rejected.reason})
                 continue

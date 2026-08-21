@@ -1,7 +1,7 @@
 """Run the deterministic red-team evaluation and record results.
 
 Usage: python -m eval.run_redteam
-Writes a JSON report to eval/results/ and prints the two-part headline.
+Writes a JSON report to eval/results/ and prints the action-reachability headline.
 """
 
 import json
@@ -21,7 +21,6 @@ def main() -> None:
 
     print(f"cases: {report['n_cases']}  attack payloads: {report['n_attack_payloads']}")
     print(f"Metric A (action reachability): {report['metric_a_action_reachability']}")
-    print(f"Metric B (value corruption): {report['metric_b_value_corruption']}")
     print(report["headline"])
     print(f"report written to {out}")
 

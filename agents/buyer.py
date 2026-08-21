@@ -50,7 +50,11 @@ class Buyer:
             raise OrderRejected("delivery")
         if not within_budget(offer["unit_price"], self.rfq.quantity, self.rfq.budget):
             raise OrderRejected("budget")
-        reason = plausibility_block_reason(offer, round_unit_prices, plausibility_config)
+        reason = plausibility_block_reason(
+            offer,
+            round_unit_prices,
+            plausibility_config,
+        )
         if reason is not None:
             raise OrderRejected(reason)
 

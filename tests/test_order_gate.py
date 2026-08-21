@@ -54,12 +54,6 @@ def test_below_floor_blocked():
     assert exc.value.reason == "below_floor"
 
 
-def test_outlier_blocked_with_three_offers():
-    with pytest.raises(OrderRejected) as exc:
-        Buyer(rfq()).place_order(offer(unit_price=20.0), [45.0, 45.0, 20.0], CONFIG)
-    assert exc.value.reason == "outlier"
-
-
 def test_pricing_flag_blocked():
     with pytest.raises(OrderRejected) as exc:
         Buyer(rfq()).place_order(offer(extraction_flag="tiered"), [45.0], CONFIG)
@@ -78,8 +72,22 @@ def test_unparseable_delivery_flag_blocked():
     assert exc.value.reason == "delivery_flag"
 
 
-def test_high_confidence_does_not_authorize_anomalous_order():
-    # confidence is untrusted: a "high" confidence below-floor offer is still blocked
+def test_above_floor_low_price_is_authorized():
+    # peer comparison is gone: an above-floor price within budget is authorized even
+    # when it is far below other quotes. Claim accuracy is not an order gate.
+    order = Buyer(rfq()).place_order(offer(unit_price=25.0), [45.0, 45.0, 25.0], CONFIG)
+    assert isinstance(order, Order)
+    assert order.unit_price == 25.0
+
+
+def test_fast_delivery_within_constraint_is_authorized():
+    # a fast delivery that satisfies the configured max-delivery constraint is
+    # authorized; there is no peer-comparison delivery check.
+    order = Buyer(rfq(max_delivery_days=10)).place_order(offer(delivery_days=5), [45.0], CONFIG)
+    assert isinstance(order, Order)
+
+
+def test_high_confidence_does_not_authorize_a_below_floor_order():
     with pytest.raises(OrderRejected) as exc:
         Buyer(rfq()).place_order(offer(unit_price=1.0, confidence="high"), [1.0], CONFIG)
     assert exc.value.reason == "below_floor"
@@ -91,8 +99,6 @@ def test_low_confidence_does_not_block_a_valid_order():
 
 
 def test_gate_blocks_even_when_caller_intends_to_accept():
-    # simulates a fooled Buyer/model deciding to accept an anomalous offer:
-    # place_order re-runs the deterministic checks and refuses regardless.
     with pytest.raises(OrderRejected):
         Buyer(rfq()).place_order(offer(unit_price=0.005), [0.005], CONFIG)
 

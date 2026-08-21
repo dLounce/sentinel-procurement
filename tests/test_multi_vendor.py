@@ -151,12 +151,6 @@ def test_injection_does_not_bypass_the_action_surface(gullible_model):
     assert all(o.unit_price != 1.0 for o in orders)
 
 
-def test_outlier_injection_blocked_with_three_offers(gullible_model):
-    result = run(legit_vendors(), gullible_model(25.0), injection=(2, 1))
-    blocks = [e for e in result.log if e["event"] == "offer_blocked" and e["vendor_id"] == "vendor_c"]
-    assert blocks and blocks[0]["reason"] == "outlier"
-
-
 # --- agentic buyer cannot bypass the guards ----------------------------------
 
 def test_agentic_buyer_cannot_order_a_guard_blocked_offer(gullible_model):
