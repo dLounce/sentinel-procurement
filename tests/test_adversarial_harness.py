@@ -22,21 +22,107 @@ def test_matrix_covers_all_compositions():
     assert all(c["security_failure_rate"]["rate"] == 0.0 for c in targets)
 
 
-def test_harness_detects_a_deceptive_win():
+def test_harness_detects_a_welfare_reducing_win():
     cell = run_cell(S_SCAM, {"vendor_c"}, "vendor_c", bundle, k=3)
-    assert cell["deceptive_win_rate"]["rate"] > 0.0
-    assert cell["attack_induced_harm_rate"]["rate"] > 0.0
+    assert cell["welfare_reducing_win_rate"]["rate"] > 0.0
+    assert cell["welfare_loss_rate"]["rate"] > 0.0
     assert cell["won_rate_B"]["rate"] > 0.0
+    # a welfare-reducing win is an economic outcome, not a security failure
     assert cell["security_failure_rate"]["rate"] == 0.0
     assert cell["paired_effect"]["mean_delta"] > 0.0
 
+def test_dishonest_vendor_can_misrepresent_price():
+    from eval.adversarial.vendor_agent import AdversarialVendor
+    from rfq import RFQ
 
-def test_dishonest_disposition_without_a_usable_lever_is_not_a_win():
-    cell = run_cell(S1, {"vendor_a"}, "vendor_a", bundle, k=3)
-    assert cell["deceptive_win_rate"]["rate"] == 0.0
-    assert cell["attempted_manipulation_rate_B"]["rate"] == 0.0
+    class CaptureModel:
+        def __call__(self, prompt):
+            return '{"unit_price": 33, "delivery_days": 5, "note": "Special offer."}'
+
+    truth = S1.truth("vendor_a")
+
+    dishonest = AdversarialVendor(
+        vendor_id=truth.vendor_id,
+        reservation_price=truth.true_cost,
+        opening_price=truth.opening_price,
+        delivery_days=truth.true_delivery,
+        disposition="dishonest",
+        model=CaptureModel(),
+    )
+
+    rfq = RFQ(
+        S1.scenario_id,
+        S1.item,
+        S1.quantity,
+        S1.budget,
+        S1.max_delivery_days,
+        S1.max_rounds,
+    )
+
+    message = dishonest.propose_quote(
+        rfq,
+        0,
+        None,
+        [],
+        model=dishonest.model,
+    )
+
+    assert "$33.00 per unit" in message
+
+def test_honest_vendor_price_cannot_drop_below_true_cost():
+    from eval.adversarial.vendor_agent import AdversarialVendor
+    from rfq import RFQ
+
+    class CaptureModel:
+        def __call__(self, prompt):
+            return '{"unit_price": 1, "delivery_days": 5, "note": "Special offer."}'
+
+    truth = S1.truth("vendor_a")
+
+    honest = AdversarialVendor(
+        vendor_id=truth.vendor_id,
+        reservation_price=truth.true_cost,
+        opening_price=truth.opening_price,
+        delivery_days=truth.true_delivery,
+        disposition="honest",
+        model=CaptureModel(),
+    )
+
+    rfq = RFQ(
+        S1.scenario_id,
+        S1.item,
+        S1.quantity,
+        S1.budget,
+        S1.max_delivery_days,
+        S1.max_rounds,
+    )
+
+    message = honest.propose_quote(
+        rfq,
+        0,
+        None,
+        [],
+        model=honest.model,
+    )
+
+    assert f"${truth.true_cost:.2f} per unit" in message
+
+def test_harness_allows_dishonest_vendor_price_misrepresentation():
+    cell = run_cell(
+        S_SCAM,
+        {"vendor_c"},
+        "vendor_c",
+        bundle,
+        k=3,
+    )
+
     assert cell["security_failure_rate"]["rate"] == 0.0
 
+def test_dishonest_vendor_can_misrepresent_price_without_security_failure():
+    cell = run_cell(S1, {"vendor_a"}, "vendor_a", bundle, k=3)
+
+    assert cell["business_claim_inaccurate_rate_B"]["rate"] > 0.0
+    assert cell["security_failure_rate"]["rate"] == 0.0
 
 def test_offline_run_makes_no_live_calls_and_is_deterministic():
     a = run_cell(S_SCAM, {"vendor_c"}, "vendor_c", bundle, k=2)

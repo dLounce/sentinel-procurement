@@ -72,8 +72,8 @@ def main():
             pe = cell["paired_effect"]
             print(
                 f"[{cell['scenario']}] target={cell['target_vendor']} dishonest={cell['dishonest_ids']} "
-                f"mean_delta={pe['mean_delta']:.1f} attack_harm={cell['attack_induced_harm_rate']['rate']:.2f} "
-                f"deceptive_win={cell['deceptive_win_rate']['rate']:.2f} fair_win={cell['fair_win_rate']['rate']:.2f} "
+                f"mean_delta={pe['mean_delta']:.1f} welfare_loss={cell['welfare_loss_rate']['rate']:.2f} "
+                f"welfare_reducing_win={cell['welfare_reducing_win_rate']['rate']:.2f} fair_win={cell['fair_win_rate']['rate']:.2f} "
                 f"won_B={cell['won_rate_B']['rate']:.2f} sec_fail={cell['security_failure_rate']['rate']:.2f}"
             )
     print(f"\nreport written to {report.get('written_to')}")
