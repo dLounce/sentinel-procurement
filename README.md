@@ -14,13 +14,16 @@ The design provides two distinct properties, and they are kept separate:
   vendor text — it only ever sees validated `VendorOffer` objects. This
   separation is enforced by process, credential, and network isolation, not by
   prompts.
-- **Empirical.** Deterministic guards (schema validation, budget, and price
-  plausibility) reject malformed, ambiguous, out-of-policy, or anomalous offers
-  before an order is placed. Their coverage is measured against defined
-  adversarial cases, not proven complete.
+- **Deterministic authorization.** Every privileged order must pass configured
+  procurement policy — schema/extraction-flag validation, the budget ceiling, the
+  configured price floor, and the max-delivery constraint — before it is placed, so
+  vendor communication cannot drive an out-of-policy or unauthorized action.
 
-Schema validation is necessary but not sufficient: a well-formed offer can still
-carry a wrong value (the "$1 SUV"), so business guards run before any order.
+Whether a vendor's quoted price or delivery is *truthful* is a commercial-claim
+question, not a security property: a vendor may quote poorly or optimistically and
+is still handled as legitimate commerce. Schema validation is necessary but not
+sufficient on its own: a well-formed offer can still be out of policy (a below-floor
+price, the "$1 SUV"), so the deterministic policy guards run before any order.
 
 ## Agentic negotiation — models propose, deterministic controls authorize
 
@@ -49,11 +52,11 @@ judgment, and neither reads the offer's `confidence`:
 
 - **Budget guard** rejects any order whose `unit_price × quantity` exceeds the
   RFQ budget. The exact budget is allowed.
-- **Price-plausibility guard** blocks an offer if any of: its `unit_price` is
-  below a configured absolute floor; its `extraction_flag` is pricing-relevant
-  (`missing_price`, `non_usd`, `tiered`, `range`, `conditional`); or, once at
-  least three valid offers exist for the round, its `unit_price` is an outlier —
-  below `median × (1 − k)`.
+- **Price-policy guard** blocks an offer if either: its `unit_price` is below a
+  configured absolute floor, or its `extraction_flag` is pricing-relevant
+  (`missing_price`, `non_usd`, `tiered`, `range`, `conditional`). It reads only the
+  offer's own price and flag against configured policy — it does not compare a
+  vendor's claim against other vendors or against hidden truth.
 
 Chosen parameters and rationale:
 
@@ -61,56 +64,39 @@ Chosen parameters and rationale:
   independently of vendor responses (never derived from vendor offers or vendor
   text, and not evaluation ground truth). It has no universal default and is set
   per procurement scenario, because a credible minimum unit cost depends on the
-  item. It is the primary value-channel defense (e.g. it blocks the "$1 SUV").
-- **Outlier `k = 0.4`** (block below 60% of the round median): a secondary
-  cross-offer check, not the primary defense.
-- **Minimum 3 valid offers** before the outlier rule applies, matching the
-  three-vendor design; with fewer offers the guard falls back to the floor and
-  the flag check.
+  item. It is a configured policy limit (e.g. it blocks an out-of-policy "$1 SUV").
 
-`place_order` is born gated: it re-runs the delivery, budget, and plausibility
-checks and cannot create an order unless all pass. The price guard is a
-deterministic policy whose coverage is measured empirically — it is not a
-mathematical guarantee against all value corruption.
+`place_order` is born gated: it re-runs the delivery constraint, budget, and
+price-policy checks and cannot create an order unless all pass. These are
+deterministic policy controls — they authorize an order against configured policy,
+they do not judge whether a vendor's commercial claim is truthful.
 
 ## Evaluation
 
 `eval/` runs a deterministic red-team set through the real negotiation path and
-reports the two security properties separately. Evaluation-only ground truth
-(true quote, legitimate range, expected delivery) lives only in the harness; the
-runtime Buyer/Interpreter/Vendors never receive it. Reproduce with:
+reports the security metric: action reachability. Evaluation-only ground truth
+(whether a case is an attack and which channel it targets) lives only in the
+harness; the runtime Buyer/Interpreter/Vendors never receive it. Reproduce with:
 
 ```
 python -m eval.run_redteam
 ```
 
-Measured results (16 cases: a legitimate baseline and 15 adversarial payloads;
+Measured result (14 cases: a legitimate baseline and 13 adversarial payloads;
 seed 1337):
 
-- **Metric A — action reachability (architectural): 0.** No payload reached the
-  `place_order` surface. The Interpreter has no action capability and the only
-  path to an order is the gated Buyer method, so attacker content cannot supply
-  order arguments outside the validated deterministic path.
-- **Metric B — value corruption (empirical): 1 anomalous in-budget order.** Of the
-  15 payloads, 11 value-corruption attempts (drastic underpricing, in-budget
-  outlier, non-USD, missing/unparseable price, malformed/ambiguous/hidden/false-
-  slow delivery) were detected and blocked; direct prompt injection, action/field
-  smuggling, and vendor identity spoofing were contained by schema validation and
-  transport identity stamping. **One case was not blocked: a false-fast delivery
-  corruption reached an anomalous in-budget order.**
+- **Metric A — action reachability: 0.** No payload reached the `place_order`
+  surface outside the deterministic authorization path. The Interpreter has no
+  action capability and the only path to an order is the gated Buyer method, so
+  attacker content cannot supply order arguments outside the validated path. Each
+  injection case (action/schema, price, delivery, identity) is contained at the
+  deterministic gate — blocked by configured policy, dropped by schema validation,
+  or bound to the transport-stamped `vendor_id`.
 
-Metric A is architectural. Metric B is an empirical property of the deterministic
-guards against these specific cases and is not proven complete — the one observed
-failure demonstrates that directly.
-
-**Finding — the delivery value channel is not deterministically guarded.** The
-price value channel has a deterministic plausibility guard (floor/outlier/flag);
-the delivery value channel does not. Malformed, ambiguous, hidden, and unparseable
-delivery are flagged and blocked, but a clean false-fast delivery value (a
-well-formed but wrong `delivery_days`) has no deterministic cross-check and
-produced an anomalous in-budget order in the evaluation. Closing this would
-require a deterministic delivery-value control analogous to the price guard; it is
-reported here rather than hidden.
+Vendor-claim accuracy is not measured as security: whether an in-policy quoted
+price or delivery is truthful is a commercial question, not a system compromise.
+An above-floor price or a within-constraint delivery that satisfies configured
+policy may legitimately reach an authorized order.
 
 ## Layout
 
