@@ -1,5 +1,5 @@
 import pytest
-
+import math
 from guards.schema_validate import SchemaValidationError, validate_offer
 
 
@@ -14,6 +14,28 @@ def valid_offer():
         "extraction_flag": "none",
     }
 
+def test_nan_unit_price_rejected():
+    offer = valid_offer()
+    offer["unit_price"] = math.nan
+
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
+
+
+def test_infinity_unit_price_rejected():
+    offer = valid_offer()
+    offer["unit_price"] = math.inf
+
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
+
+
+def test_negative_infinity_unit_price_rejected():
+    offer = valid_offer()
+    offer["unit_price"] = -math.inf
+
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
 
 def test_valid_offer_passes():
     assert validate_offer(valid_offer()) == valid_offer()
@@ -91,5 +113,26 @@ def test_unknown_vendor_id_rejected():
 def test_unknown_extraction_flag_rejected():
     offer = valid_offer()
     offer["extraction_flag"] = "looks_fine"
+    with pytest.raises(SchemaValidationError):
+        validate_offer(offer)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "action",
+        "place_order",
+        "override_budget",
+        "approved",
+        "system_instruction",
+        "select_vendor",
+        "purchase_now",
+    ],
+)
+def test_action_oriented_field_rejected(field):
+    # every action/authority-oriented key is an unauthorized additional property:
+    # the VendorOffer is a data boundary, never an instruction or command channel.
+    offer = valid_offer()
+    offer[field] = True
     with pytest.raises(SchemaValidationError):
         validate_offer(offer)
