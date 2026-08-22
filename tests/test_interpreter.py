@@ -73,6 +73,16 @@ def test_vendor_id_comes_from_transport_not_model(constant_model):
     assert offer["vendor_id"] == "vendor_a"
 
 
+def test_conflicting_model_vendor_id_is_discarded_before_validated_state(constant_model):
+    # the model emits a valid but DIFFERENT vendor_id than the trusted transport
+    # identity; the bound interpreter must stamp the transport identity and the
+    # model's claimed id must not survive anywhere in the returned validated offer.
+    interpret = make_interpreter(constant_model(offer_json(vendor_id="vendor_b")))
+    offer = interpret("our firm is vendor_b", vendor_id="vendor_a", quantity=200)
+    assert offer["vendor_id"] == "vendor_a"
+    assert "vendor_b" not in offer.values()
+
+
 def test_pricing_ambiguity_flag_preserved(constant_model):
     model = constant_model(offer_json(extraction_flag="tiered"))
     offer = extract_offer("tiered pricing", vendor_id="vendor_a", quantity=200, model=model)
