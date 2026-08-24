@@ -19,6 +19,7 @@ from typing import Optional, TypedDict
 from langgraph.graph import END, StateGraph
 
 from guards.decision_guard import validate_decision
+from guards.procurement import procurement_rank_key
 from guards.schema_validate import SchemaValidationError
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -54,7 +55,7 @@ def deterministic_decision(rfq: dict, offers: list, history: list) -> dict:
     deliverable = [o for o in offers if o["delivery_days"] <= rfq["max_delivery_days"]]
     affordable = [o for o in deliverable if o["unit_price"] <= affordable_unit]
     if affordable:
-        best = min(affordable, key=lambda o: o["unit_price"])
+        best = min(affordable, key=procurement_rank_key)
         return {"action": "accept", "vendor_id": best["vendor_id"], "counter_price": None, "rationale": "fallback"}
 
     pool = deliverable or offers
@@ -64,7 +65,7 @@ def deterministic_decision(rfq: dict, offers: list, history: list) -> dict:
         prev_best = _prev_best_price(history, rfq["max_delivery_days"])
         if prev_best is not None and best_price >= prev_best - 1e-9:
             return {"action": "reject", "vendor_id": None, "counter_price": None, "rationale": "fallback"}
-        target = min(pool, key=lambda o: o["unit_price"])["vendor_id"]
+        target = min(pool, key=procurement_rank_key)["vendor_id"]
         return {"action": "counter", "vendor_id": target, "counter_price": counter_price, "rationale": "fallback"}
     return {"action": "counter", "vendor_id": None, "counter_price": counter_price, "rationale": "fallback"}
 

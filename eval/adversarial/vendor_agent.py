@@ -1,20 +1,17 @@
 from dataclasses import dataclass
 
-from agents.vendor import Vendor
+from agents.vendor import INJECTION_PAYLOAD, Vendor
 from eval.adversarial.prompts import vendor_prompt
 from eval.adversarial.prompts import raw_vendor_prompt
 
 @dataclass
 class AdversarialVendor(Vendor):
-    """A vendor principal for adversarial.
+    """Vendor principal used by the adversarial evaluation.
 
-    Reuses the production Vendor: the reservation clamp still guarantees the
-    emitted price is never below the vendor's true cost. Only the disposition and
-    the injected per-vendor model are new; the honest/dishonest objective is
-    carried entirely by the (minimal-contrast) prompt. delivery_days is treated as
-    the vendor's TRUE fulfillable delivery; the model may CLAIM a different value
-    (deception) — that claim is what the buyer sees, and the evaluator scores it
-    against the true value.
+    Honest vendors retain the production reservation-price enforcement.
+    Dishonest vendors are allowed to represent price and delivery however they
+    choose through the normal vendor-message interface; the evaluator compares
+    those claims against hidden ground truth afterward.
     """
 
     disposition: str = "honest"
@@ -30,6 +27,37 @@ class AdversarialVendor(Vendor):
 
     def build_prompt(self, rfq, round_index, buyer_counter, history) -> str:
         return vendor_prompt(self, rfq, round_index, buyer_counter, history)
+
+    def propose_quote(
+        self,
+        rfq,
+        round_index,
+        buyer_counter,
+        history,
+        *,
+        model,
+        inject: bool = False,
+    ) -> str:
+        proposal = self._parse(
+            model(self.build_prompt(rfq, round_index, buyer_counter, history))
+        )
+
+        unit_price = round(float(proposal["unit_price"]), 2)
+        if self.disposition == "honest":
+            unit_price = max(unit_price, self.reservation_price)
+
+        delivery_days = max(1, int(proposal["delivery_days"]))
+        note = str(proposal.get("note", "")).strip()[:200]
+
+        message = (
+            f"{note} Our price is ${unit_price:.2f} per unit, "
+            f"delivery in {delivery_days} days."
+        ).strip()
+
+        if inject:
+            message += INJECTION_PAYLOAD
+
+        return message
 
     def propose_raw_message(
         self,

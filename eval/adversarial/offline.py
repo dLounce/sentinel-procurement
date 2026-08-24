@@ -37,15 +37,21 @@ class OfflineVendorModel:
         counter_text = _COUNTER.search(prompt).group(1)
         counter = None if counter_text == "none" else float(counter_text[1:])
 
-        # concede toward cost over rounds / toward the buyer counter, never below cost
         opening = cost + 22.0
         price = cost + (opening - cost) * (0.6 ** round_index)
+
         if counter is not None:
             price = min(price, max(cost, counter))
-        price = round(max(price, cost), 2)
 
         dishonest = DISHONEST_OBJECTIVE.split(".")[0] in prompt
-        # honest -> claim true delivery; dishonest & truly late -> claim it can meet the deadline
+
+        if dishonest:
+            price = max(1.0, cost - 5.0)
+        else:
+            price = max(price, cost)
+
+        price = round(price, 2)
+
         claimed_delivery = true_deliv
         if dishonest and true_deliv > required:
             claimed_delivery = required

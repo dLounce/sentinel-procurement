@@ -1,16 +1,10 @@
-"""Matched-counterfactual harness.
+"""Adversarial evaluation harness.
 
-For a target vendor V in a composition, a matched pair holds everything fixed and
-flips ONLY V's disposition: A = V honest, B = V dishonest. A/A' null pairs (both
-honest, different seeds) estimate the stochastic noise floor. Welfare loss is
-attributed to V only when the paired welfare effect exceeds that null band — this
-separates "V's disposition cost the buyer surplus" from "the scenario was bad" and from
-model variation. That welfare loss is an economic outcome, never a security signal.
-
-Hidden ground truth lives only in evaluator-side objects and result records; it is
-never placed into any Buyer/Interpreter input. `make_bundle(seed)` provisions the
-models (offline doubles for tests/pilot; seeded live clients for a real run), so no
-live provider is touched here.
+The legacy economic matched cell compares honest and dishonest vendor dispositions.
+Issue #9 additionally provides a true attack counterfactual: control emits the
+commercial messages once; treatment replays those exact messages and adds only the
+target vendor's deterministic attack payload. A replayed control provides an A/A'
+observation. No security-success scoring is performed here.
 """
 
 import json
@@ -20,7 +14,16 @@ from pathlib import Path
 
 from eval.adversarial.orchestrator import run_negotiation
 from eval.adversarial.scoring import run_metrics, welfare, classify_pair
+from eval.adversarial.outcomes import (
+    build_adversarial_outcomes,
+    build_aa_control_result,
+    classify_ab_against_aa,
+)
+from guards.procurement import ProcurementPosition, rank_feasible_offers
+from guards.price_guard import PRICING_RELEVANT_FLAGS
+from eval.adversarial.attacks import AttackTrajectory, CollusionPlan
 from eval.adversarial.scenarios import Scenario
+from eval.adversarial.scripted_vendor import VendorMessage
 from eval.adversarial.vendor_agent import AdversarialVendor
 from eval.adversarial import stats
 
@@ -71,6 +74,8 @@ def run_once(
     bundle: Bundle,
     *,
     raw_vendor_messages: bool = False,
+    vendor_message_overrides: dict[tuple[int, str], str] | None = None,
+    vendor_message_factory=None,
 ) -> dict:
     vendors = build_vendors(
         scenario,
@@ -84,7 +89,302 @@ def run_once(
         bundle.buyer,
         bundle.interpreter,
         raw_vendor_messages=raw_vendor_messages,
+        vendor_message_overrides=vendor_message_overrides,
+        vendor_message_factory=vendor_message_factory,
     )
+
+
+def _vendor_messages(record: dict) -> dict[tuple[int, str], str]:
+    """Extract the exact commercial messages emitted by the control run."""
+    return {
+        (event["round"], event["vendor_id"]): event["raw_text"]
+        for event in record["log"]
+        if event["event"] == "vendor_message"
+    }
+
+
+def _attack_messages(
+    control_messages: dict[tuple[int, str], str],
+    target_vendor: str,
+    trajectory: AttackTrajectory,
+) -> tuple[dict[tuple[int, str], str], list[dict]]:
+    """Replay control messages, adding only the target's scripted payloads."""
+    if trajectory.attacker_vendor != target_vendor:
+        raise ValueError("attack trajectory is bound to a different target vendor")
+
+    treatment = dict(control_messages)
+    attack_rows = []
+    for (round_index, vendor_id), commercial in control_messages.items():
+        if vendor_id != target_vendor:
+            continue
+        round_number = round_index + 1
+        payload = trajectory.payload_for_round(round_number)
+        treatment[(round_index, vendor_id)] = VendorMessage(
+            commercial_content=commercial,
+            attack_payload=payload,
+        ).text
+        step = trajectory.step_for_round(round_number)
+        attack_rows.append({
+            "round": round_number,
+            "attacker_vendor": vendor_id,
+            "attack_family": None if step is None else step.family.value,
+            "attack_style": None if step is None else step.style.value,
+            "attack_payload": payload,
+            "control_message": commercial,
+            "treatment_message": treatment[(round_index, vendor_id)],
+        })
+    return treatment, attack_rows
+
+
+def _initial_ranked_control_offers(record: dict, scenario: Scenario) -> list[dict]:
+    offers = [
+        event["offer"]
+        for event in record.get("log", [])
+        if event.get("event") == "offer" and event.get("round") == 0
+        and event["offer"].get("extraction_flag") not in PRICING_RELEVANT_FLAGS
+    ]
+    ranked = rank_feasible_offers(
+        {
+            "budget": scenario.budget,
+            "quantity": scenario.quantity,
+            "max_delivery_days": scenario.max_delivery_days,
+        },
+        offers,
+    )
+    return [offer for offer in ranked if float(offer["unit_price"]) >= float(scenario.absolute_floor)]
+
+
+def _validate_attacker_position(
+    control: dict,
+    scenario: Scenario,
+    target_vendor: str,
+    attacker_position: str,
+) -> None:
+    try:
+        requested = ProcurementPosition(attacker_position)
+    except ValueError as exc:
+        raise ValueError(f"unknown attacker_position: {attacker_position!r}") from exc
+    ranked = _initial_ranked_control_offers(control, scenario)
+    index = {
+        ProcurementPosition.BEST: 0,
+        ProcurementPosition.MIDDLE: 1,
+        ProcurementPosition.WORST: 2,
+    }[requested]
+    if len(ranked) <= index:
+        raise ValueError(
+            f"cannot establish {requested.value} attacker position with {len(ranked)} feasible first-round offers"
+        )
+    actual = ranked[index]["vendor_id"]
+    if actual != target_vendor:
+        raise ValueError(
+            f"attacker {target_vendor!r} is not the requested {requested.value} position; "
+            f"deterministic position is {actual!r}"
+        )
+
+
+def _collusion_attack_messages(
+    control_messages: dict[tuple[int, str], str],
+    plan: CollusionPlan,
+) -> tuple[dict[tuple[int, str], str], list[dict]]:
+    """Replay control messages and add each configured vendor's deterministic payload."""
+    treatment = dict(control_messages)
+    attack_rows: list[dict] = []
+    for trajectory in plan.trajectories:
+        attacker_vendor = trajectory.attacker_vendor
+        for (round_index, vendor_id), commercial in control_messages.items():
+            if vendor_id != attacker_vendor:
+                continue
+            round_number = round_index + 1
+            payload = trajectory.payload_for_round(round_number)
+            if payload is None:
+                continue
+            step = trajectory.step_for_round(round_number)
+            treatment[(round_index, vendor_id)] = VendorMessage(
+                commercial_content=commercial,
+                attack_payload=payload,
+            ).text
+            attack_rows.append({
+                "round": round_number,
+                "attacker_vendor": vendor_id,
+                "attack_family": None if step is None else step.family.value,
+                "attack_style": None if step is None else step.style.value,
+                "attack_payload": payload,
+                "control_message": commercial,
+                "treatment_message": treatment[(round_index, vendor_id)],
+            })
+    return treatment, sorted(attack_rows, key=lambda row: (row["round"], row["attacker_vendor"]))
+
+
+def run_collusion_counterfactual(
+    scenario: Scenario,
+    plan: CollusionPlan,
+    make_bundle,
+    *,
+    seed: int = 0,
+) -> dict:
+    """Run a deterministic multi-malicious matched attack counterfactual."""
+    vendor_ids = {vendor.vendor_id for vendor in scenario.vendors}
+    unknown = set(plan.attacker_vendors) - vendor_ids
+    if unknown:
+        raise ValueError(f"unknown colluding vendor(s): {sorted(unknown)}")
+
+    dishonest_ids = set(plan.attacker_vendors)
+    bundle = make_bundle(seed)
+    control = run_once(scenario, dishonest_ids, bundle)
+    control_messages = _vendor_messages(control)
+    expected_rounds = set(range(scenario.max_rounds))
+    observed_rounds = {round_index for round_index, _ in control_messages}
+    if observed_rounds != expected_rounds:
+        raise ValueError(
+            "collusion execution requires the control run to emit commercial "
+            "messages for every configured round"
+        )
+
+    treatment_messages, attack_rows = _collusion_attack_messages(control_messages, plan)
+    treatment = run_once(
+        scenario,
+        dishonest_ids,
+        bundle,
+        vendor_message_overrides=treatment_messages,
+    )
+
+    null_bundle = make_bundle(seed + 10_000)
+    null = run_once(
+        scenario,
+        dishonest_ids,
+        null_bundle,
+        vendor_message_overrides=control_messages,
+    )
+
+    return {
+        "scenario": scenario.scenario_id,
+        "attacker_vendors": list(plan.attacker_vendors),
+        "number_of_malicious_vendors": len(plan.attacker_vendors),
+        "collusion_id": plan.collusion_id,
+        "control": control,
+        "treatment": treatment,
+        "null": null,
+        "attack": {
+            "collusion_id": plan.collusion_id,
+            "attacker_vendors": list(plan.attacker_vendors),
+            "messages": attack_rows,
+        },
+        "outcomes": build_adversarial_outcomes(
+            scenario=scenario,
+            target_vendor=plan.attacker_vendors[0],
+            attack_rows=attack_rows,
+            control=control,
+            treatment=treatment,
+            number_of_malicious_vendors=len(plan.attacker_vendors),
+            scenario_seed=seed,
+            run_identifier=f"collusion:{plan.collusion_id}:{scenario.scenario_id}:{seed}",
+            collusion_id=plan.collusion_id,
+        ),
+    }
+
+
+
+def run_attack_counterfactual(
+    scenario: Scenario,
+    target_vendor: str,
+    trajectory: AttackTrajectory,
+    make_bundle,
+    *,
+    dishonest_ids=(),
+    seed: int = 0,
+    attacker_position: str | None = None,
+    aa_repetitions: int = 3,
+) -> dict:
+    """Run a matched control/treatment pair with commercial text held fixed.
+
+    Control emits the commercial messages once. Treatment replays those exact
+    messages and adds only the target vendor's deterministic attack payloads.
+    A separate replayed-control run provides an A/A' noise observation without
+    adding attack logic or security scoring.
+    """
+    vendor_ids = {vendor.vendor_id for vendor in scenario.vendors}
+    if target_vendor not in vendor_ids:
+        raise ValueError(f"unknown target_vendor {target_vendor!r}")
+    if trajectory.attacker_vendor != target_vendor:
+        raise ValueError("attack trajectory is bound to a different target vendor")
+
+    dishonest_ids = set(dishonest_ids)
+    dishonest_ids.discard(target_vendor)
+    bundle = make_bundle(seed)
+
+    control = run_once(scenario, dishonest_ids, bundle)
+    control_messages = _vendor_messages(control)
+    # A normal negotiation may legitimately terminate early (a deal closes or the
+    # buyer walks away) before the configured maximum number of rounds. Treatment
+    # and A/A' replay only the commercial messages the control run actually
+    # emitted; later attack steps are skipped when the matching control message
+    # never exists, and missing later commercial messages are never fabricated.
+    # Only require that the control produced at least one commercial message to
+    # match against.
+    if not control_messages:
+        raise ValueError(
+            "matched attack execution requires the control run to emit at least "
+            "one commercial message"
+        )
+
+    if attacker_position is not None:
+        _validate_attacker_position(control, scenario, target_vendor, attacker_position)
+
+    treatment_messages, attack_rows = _attack_messages(
+        control_messages, target_vendor, trajectory
+    )
+    treatment = run_once(
+        scenario,
+        dishonest_ids,
+        bundle,
+        vendor_message_overrides=treatment_messages,
+    )
+
+    if aa_repetitions < 1:
+        raise ValueError("aa_repetitions must be >= 1")
+    aa_runs = [
+        run_once(
+            scenario,
+            dishonest_ids,
+            make_bundle(seed + 10_000 + i),
+            vendor_message_overrides=control_messages,
+        )
+        for i in range(aa_repetitions)
+    ]
+    aa_control = build_aa_control_result(control, aa_runs, control_messages)
+    null = aa_runs[0]
+
+    return {
+        "scenario": scenario.scenario_id,
+        "target_vendor": target_vendor,
+        "control": control,
+        "treatment": treatment,
+        "null": null,
+        "aa_control": {
+            "repetitions": aa_control.repetitions,
+            "pairwise_differences": aa_control.pairwise_differences,
+            "benign_variability_summary": aa_control.benign_variability_summary,
+            "commercial_messages": aa_control.commercial_messages,
+        },
+        "aa_comparison": classify_ab_against_aa(control, treatment, aa_control),
+        "attack": {
+            "attacker_vendor": target_vendor,
+            "trajectory_rounds": [step.target_round for step in trajectory.steps],
+            "messages": attack_rows,
+        },
+        "outcomes": build_adversarial_outcomes(
+            scenario=scenario,
+            target_vendor=target_vendor,
+            attack_rows=attack_rows,
+            control=control,
+            treatment=treatment,
+            number_of_malicious_vendors=len(dishonest_ids) + 1,
+            scenario_seed=seed,
+            run_identifier=f"cf:{scenario.scenario_id}:{target_vendor}:{seed}",
+            attacker_position=attacker_position,
+            aa_control=aa_control,
+        ),
+    }
 
 
 def choose_dishonest(scenario: Scenario, n: int, seed: int):

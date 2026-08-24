@@ -19,24 +19,56 @@ from guards.schema_validate import SchemaValidationError
 from rfq import RFQ
 
 
-def run_negotiation(scenario, vendors, buyer_model, interpreter_model,* ,raw_vendor_messages: bool = False, ) -> dict:
+HARD_MAX_ROUNDS = 5
+
+
+def effective_max_rounds(configured_max_rounds: int) -> int:
+    """Bound evaluator negotiation rounds without changing production semantics."""
+
+    return min(configured_max_rounds, HARD_MAX_ROUNDS)
+
+
+def run_negotiation(
+    scenario,
+    vendors,
+    buyer_model,
+    interpreter_model,
+    *,
+    raw_vendor_messages: bool = False,
+    vendor_message_overrides: dict[tuple[int, str], str] | None = None,
+    vendor_message_factory=None,
+) -> dict:
+    max_rounds = effective_max_rounds(scenario.max_rounds)
     rfq = RFQ(scenario.scenario_id, scenario.item, scenario.quantity, scenario.budget,
-              scenario.max_delivery_days, scenario.max_rounds)
+              scenario.max_delivery_days, max_rounds)
     config = PlausibilityConfig(absolute_floor=scenario.absolute_floor)
     interpreter = make_interpreter(interpreter_model)
-    buyer_decider = make_buyer_decider(buyer_model)
+    buyer_outputs = []
+
+    def recording_buyer_model(prompt):
+        raw_output = buyer_model(prompt)
+        buyer_outputs.append(raw_output)
+        return raw_output
+
+    buyer_decider = make_buyer_decider(recording_buyer_model)
     buyer = Buyer(rfq)
     rfq_view = {"item": rfq.item, "quantity": rfq.quantity, "budget": rfq.budget,
                 "max_delivery_days": rfq.max_delivery_days}
 
     log = []
     history = []
+    vendor_message_overrides = vendor_message_overrides or {}
     counter = None
     for round_index in range(rfq.max_rounds):
         offers = []
         for vendor in vendors:
             try:
-                if raw_vendor_messages:
+                override = vendor_message_overrides.get((round_index, vendor.vendor_id))
+                if override is not None:
+                    raw = override
+                elif vendor_message_factory is not None:
+                    raw = vendor_message_factory(round_index, vendor.vendor_id)
+                elif raw_vendor_messages:
                     if not hasattr(vendor, "propose_raw_message"):
                         raise TypeError(
                             f"{type(vendor).__name__} does not support raw vendor messages"
@@ -62,9 +94,32 @@ def run_negotiation(scenario, vendors, buyer_model, interpreter_model,* ,raw_ven
             log.append({"event": "vendor_message", "round": round_index, "vendor_id": vendor.vendor_id, "raw_text": raw})
             try:
                 offer = interpreter(raw, vendor_id=vendor.vendor_id, quantity=rfq.quantity)
-            except (SchemaValidationError, ExtractionError) as exc:
+            except SchemaValidationError as exc:
+                log.append({
+                    "event": "schema_result",
+                    "round": round_index,
+                    "vendor_id": vendor.vendor_id,
+                    "status": "invalid",
+                    "reason": type(exc).__name__,
+                })
                 log.append({"event": "offer_dropped", "round": round_index, "vendor_id": vendor.vendor_id, "reason": type(exc).__name__})
                 continue
+            except ExtractionError as exc:
+                log.append({
+                    "event": "schema_result",
+                    "round": round_index,
+                    "vendor_id": vendor.vendor_id,
+                    "status": "not_evaluated",
+                    "reason": type(exc).__name__,
+                })
+                log.append({"event": "offer_dropped", "round": round_index, "vendor_id": vendor.vendor_id, "reason": type(exc).__name__})
+                continue
+            log.append({
+                "event": "schema_result",
+                "round": round_index,
+                "vendor_id": vendor.vendor_id,
+                "status": "valid",
+            })
             log.append({"event": "offer", "round": round_index, "offer": offer})
             offers.append(offer)
 
@@ -78,6 +133,8 @@ def run_negotiation(scenario, vendors, buyer_model, interpreter_model,* ,raw_ven
                 log.append({"event": "offer_blocked", "round": round_index, "vendor_id": offer["vendor_id"], "reason": reason})
 
         decision = validate_decision(buyer_decider(rfq_view, plausible, history, round_index, rfq.max_rounds))
+        raw_buyer_output = buyer_outputs[-1] if buyer_outputs else None
+        log.append({"event": "buyer_output", "round": round_index, "raw_output": raw_buyer_output})
         log.append({"event": "decision", "round": round_index, "action": decision["action"], "vendor_id": decision.get("vendor_id"), "counter_price": decision.get("counter_price")})
         history.append({"round": round_index, "offers": plausible, "decision": decision})
 
