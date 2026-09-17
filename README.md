@@ -2,6 +2,8 @@
 
 A privilege-separated multi-agent procurement system, with an adversarial security evaluation that tests whether untrusted vendor text can ever push a real, model-driven Buyer into an unauthorized or out-of-policy purchase.
 
+See [`RESPONSIBLE_AI.md`](RESPONSIBLE_AI.md) for intended use, the threat model, human-oversight requirements, privacy and fairness limits, evaluation caveats, and the deployment gate.
+
 ## Results at a glance
 
 Live model runs, 100 completed attack replications across 10 attack families, on the defended architecture:
@@ -119,4 +121,4 @@ tests/     control-level and evaluation tests
 
 ## Status
 
-Complete. The negotiation system, the deterministic authorization controls, the 25-cell representative matrix, and the live attack evaluation are all implemented and tested.
+The negotiation system, deterministic authorization controls, 25-cell representative matrix, and live attack evaluation are implemented and tested. The AgentCore deployment remains undeployed and unverified; its README keeps those claims separate from the locally tested system.
